@@ -1,8 +1,13 @@
-service: "service:SDXLTurbo"
+service: "service:BuildGreeting"
 labels:
-  owner: bentoml-team
-  project: gallery
+  owner: ilya-test
+  project: test
 include:
 - "*.py"
+- "*.wav"
 python:
   requirements_txt: "./requirements.txt"
+  lock_packages: false
+envs:
+  - name: "COQUI_TOS_AGREED"
+    value: 1
