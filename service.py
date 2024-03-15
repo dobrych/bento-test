@@ -30,7 +30,7 @@ Generate sincere text for greeting card in five sentences witha a theme: {user_p
     traffic={"timeout": 600},
     workers=1,
     resources={
-        "gpu": 1,
+        "gpu": 0.33,
         "gpu_type": "nvidia-l4",
     },
 )
@@ -69,7 +69,7 @@ class SDXLTurbo:
         "timeout": 300,
     },
     resources={
-        "gpu": 1,
+        "gpu": 0.33,
         "gpu_type": "nvidia-l4",
     },
 )
@@ -96,10 +96,9 @@ class VLLM:
         SAMPLING_PARAM = SamplingParams(max_tokens=max_tokens)
         prompt = PROMPT_TEMPLATE.format(user_prompt=prompt)
         stream = await self.engine.add_request(uuid.uuid4().hex, prompt, SAMPLING_PARAM)
-        async for request_output in stream:
-            yield request_output.outputs[0].text
 
         cursor = 0
+
         async for request_output in stream:
             text = request_output.outputs[0].text
             yield text[cursor:]
@@ -108,7 +107,7 @@ class VLLM:
 
 @bentoml.service(
     resources={
-        "gpu": 1,
+        "gpu": 0.33,
         "memory": "8Gi",
     },
     traffic={"timeout": 300},
