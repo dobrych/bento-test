@@ -18,12 +18,12 @@ TEXT_MODEL = "meta-llama/Llama-2-7b-chat-hf"
 MAX_TOKENS = 512
 CARD_DESIGN_PROMPT = """{text} beautiful cute postcard"""
 PROMPT_TEMPLATE = """<s>[INST] <<SYS>>
-You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
+You are a helpful, respectful and honest assistant that gives straight answers without explanation. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
 
 If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.
 <</SYS>>
 
-Generate sincere text for greeting card in five sentences witha a theme: {user_prompt} [/INST] """
+What is a good one sentence greeting card text for: {user_prompt}. Provide just the text of the card without explanation. Do not read back the prompt. [/INST] """
 
 
 @bentoml.service(
@@ -48,13 +48,13 @@ class SDXLTurbo:
         #self.pipe.to(device="cuda")
 
     @bentoml.api
-    async def txt2img(
+    def txt2img(
             self,
             prompt: str,
-            num_inference_steps: Annotated[int, Ge(1), Le(10)] = 1,
+            num_inference_steps: Annotated[int, Ge(1), Le(15)] = 1,
             guidance_scale: float = 0.0,
     ):
-        # imgs = 
+        # imgs =
         return self.pipe(
             prompt=prompt,
             num_inference_steps=num_inference_steps,
@@ -76,34 +76,36 @@ class SDXLTurbo:
 
 class VLLM:
     def __init__(self) -> None:
-        from vllm import AsyncEngineArgs, AsyncLLMEngine
+        from vllm import EngineArgs, LLMEngine
 
-        ENGINE_ARGS = AsyncEngineArgs(
+        ENGINE_ARGS = EngineArgs(
+            dtype='float16',
+            gpu_memory_utilization=0.5,
+            max_parallel_loading_workers=1,
             model=TEXT_MODEL,
             max_model_len=MAX_TOKENS
         )
-        
-        self.engine = AsyncLLMEngine.from_engine_args(ENGINE_ARGS)
+
+        self.engine = LLMEngine.from_engine_args(ENGINE_ARGS)
 
     @bentoml.api
-    async def generate_text(
+    def generate_text(
         self,
-        prompt: str,
+        prompt: str = "Hello",
         max_tokens: Annotated[int, Ge(128), Le(MAX_TOKENS)] = MAX_TOKENS,
-    ) -> AsyncGenerator[str, None]:
+    ) -> str:
         from vllm import SamplingParams
 
         SAMPLING_PARAM = SamplingParams(max_tokens=max_tokens)
         prompt = PROMPT_TEMPLATE.format(user_prompt=prompt)
-        stream = await self.engine.add_request(uuid.uuid4().hex, prompt, SAMPLING_PARAM)
-
-        cursor = 0
-
-        async for request_output in stream:
-            text = request_output.outputs[0].text
-            yield text[cursor:]
-            cursor = len(text)
-
+        stream = self.engine.add_request(uuid.uuid4().hex, prompt, SAMPLING_PARAM)
+        while True:
+            request_outputs = self.engine.step()
+            for request_output in request_outputs:
+                if request_output.finished:
+                    return request_output.outputs[0].text
+            if not (self.engine.has_unfinished_requests()):
+                break
 
 @bentoml.service(
     resources={
@@ -119,9 +121,9 @@ class XTTS:
         from TTS.api import TTS
 
         self.tts = TTS(TTS_MODEL, gpu=torch.cuda.is_available())
-    
+
     @bentoml.api
-    async def get_audio(
+    def get_audio(
             self,
             context: bentoml.Context,
             text: str,
@@ -139,12 +141,13 @@ class XTTS:
             language=lang,
             split_sentences=True,
         )
+        print(output_path)
         return Path(output_path)
 
 
 @bentoml.service(
     traffic={"timeout": 600},
-    workers=2,
+    workers=1,
     resources={"cpu": "1"}
 )
 
@@ -154,42 +157,41 @@ class BuildGreeting:
     audgen = bentoml.depends(XTTS)
 
     @bentoml.api
-    async def generate(self, text):
+    async def generate(self, context: bentoml.Context, text):
+        print('text: ', text, type(text))
         fileid = uuid.uuid4().hex
-        txt = await self.txtgen.generate_text(prompt=CARD_DESIGN_PROMPT.format(text=text))
-        img = await self.imggen.txt2img(prompt=txt, num_inference_steps=5, guidance_scale=5)
-        aud = await self.audgen.get_audio(txt=text)
-
+        txt = self.txtgen.generate_text(prompt=CARD_DESIGN_PROMPT.format(text=text))
         print(txt)
+        aud = self.audgen.get_audio(text=txt)
+        img = self.imggen.txt2img(prompt=f"Beautiful birtday postcard: {text}", num_inference_steps=15, guidance_scale=5.0)
+
         print(aud)
+        print(img)
+
+        # save image to temp file
+        img = img[0][0]
+        img_path = os.path.join(
+            Path(context.temp_dir),
+            Path("{fileid}.png".format(fileid=fileid))
+        )
+        img.save(img_path)
 
         videofile_path = os.path.join(
-            bentoml.Context.temp_dir, 
-            "{fileid}.mp4".format(fileid=fileid)
+            Path(context.temp_dir),
+            Path("{fileid}.mp4".format(fileid=fileid))
         )
 
         ffmpeg = (
             FFmpeg()
-            .option("loop", 1)
             .option("y")
-            .input(img)
+            .option("loop", 1)
+            .input(img_path)
             .input(aud)
-            .option("c:v", "libx264")
-            .option("tune", "stillimage")
-            .option("c:a", "acc")
-            .option("b:a", "192k")
-            .option("pix_fmt", "yuv420p")
-            .option("shortest")
-            .output(
-                videofile_path,
-                # {"codec:v": "libx264"},
-                # vf="scale=1280:-1",
-                # preset="veryslow",
-                # crf=24,
+            .output(videofile_path,
+                {"c:v": "libx264", "tune": "stillimage", "c:a": "aac", "b:a": "192k", "pix_fmt": "yuv420p", "shortest": None}
             )
         )
 
         mpfile = await ffmpeg.execute()
         print(videofile_path, mpfile)
         return Path(videofile_path)
-
