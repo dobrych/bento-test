@@ -76,9 +76,9 @@ class SDXLTurbo:
 
 class VLLM:
     def __init__(self) -> None:
-        from vllm import EngineArgs, LLMEngine
+        from vllm import AsyncEngineArgs, AsyncLLMEngine
 
-        ENGINE_ARGS = EngineArgs(
+        ENGINE_ARGS = AsyncEngineArgs(
             dtype='float16',
             gpu_memory_utilization=0.5,
             max_parallel_loading_workers=1,
@@ -86,26 +86,22 @@ class VLLM:
             max_model_len=MAX_TOKENS
         )
 
-        self.engine = LLMEngine.from_engine_args(ENGINE_ARGS)
+        self.engine = AsyncLLMEngine.from_engine_args(ENGINE_ARGS)
 
     @bentoml.api
-    def generate_text(
+    async def generate_text(
         self,
         prompt: str = "Hello",
         max_tokens: Annotated[int, Ge(128), Le(MAX_TOKENS)] = MAX_TOKENS,
-    ) -> str:
+    ) -> AsyncGenerator[str, None]:
         from vllm import SamplingParams
 
         SAMPLING_PARAM = SamplingParams(max_tokens=max_tokens)
         prompt = PROMPT_TEMPLATE.format(user_prompt=prompt)
-        stream = self.engine.add_request(uuid.uuid4().hex, prompt, SAMPLING_PARAM)
-        while True:
-            request_outputs = self.engine.step()
-            for request_output in request_outputs:
-                if request_output.finished:
-                    return request_output.outputs[0].text
-            if not (self.engine.has_unfinished_requests()):
-                break
+        stream = await self.engine.add_request(uuid.uuid4().hex, prompt, SAMPLING_PARAM)
+        async for request_output in stream:
+            if request_output.finished:
+                return request_output.outputs[0].text
 
 @bentoml.service(
     resources={
@@ -122,7 +118,7 @@ class XTTS:
         self.tts = TTS(TTS_MODEL, gpu=torch.cuda.is_available())
 
     @bentoml.api
-    def get_audio(
+    async def get_audio(
             self,
             context: bentoml.Context,
             text: str,
@@ -133,7 +129,7 @@ class XTTS:
         if not os.path.exists(sample_path):
             sample_path = "./src/female.wav"
 
-        self.tts.tts_to_file(
+        await self.tts.tts_to_file(
             text,
             file_path=output_path,
             speaker_wav=sample_path,
@@ -157,15 +153,10 @@ class BuildGreeting:
 
     @bentoml.api
     async def generate(self, context: bentoml.Context, text):
-        print('text: ', text, type(text))
         fileid = uuid.uuid4().hex
-        txt = self.txtgen.generate_text(prompt=CARD_DESIGN_PROMPT.format(text=text))
-        print(txt)
-        aud = self.audgen.get_audio(text=txt)
-        img = self.imggen.txt2img(prompt=f"Beautiful birtday postcard: {text}", num_inference_steps=15, guidance_scale=5.0)
-
-        print(aud)
-        print(img)
+        txt = await self.txtgen.generate_text(prompt=CARD_DESIGN_PROMPT.format(text=text))
+        aud = await self.audgen.get_audio(text=txt)
+        img = await self.imggen.txt2img(prompt=f"Beautiful birtday postcard: {text}", num_inference_steps=15, guidance_scale=5.0)
 
         # save image to temp file
         img = img[0][0]
@@ -192,5 +183,4 @@ class BuildGreeting:
         )
 
         mpfile = await ffmpeg.execute()
-        print(videofile_path, mpfile)
         return Path(videofile_path)
