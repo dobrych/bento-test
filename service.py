@@ -48,7 +48,7 @@ class SDXLTurbo:
         #self.pipe.to(device="cuda")
 
     @bentoml.api
-    def txt2img(
+    async def txt2img(
             self,
             prompt: str,
             num_inference_steps: Annotated[int, Ge(1), Le(15)] = 1,
@@ -129,7 +129,7 @@ class XTTS:
         if not os.path.exists(sample_path):
             sample_path = "./src/female.wav"
 
-        await self.tts.tts_to_file(
+        self.tts.tts_to_file(
             text,
             file_path=output_path,
             speaker_wav=sample_path,
