@@ -27,10 +27,10 @@ What is a good one sentence greeting card text for: {user_prompt}. Provide just 
 
 
 @bentoml.service(
-    traffic={"timeout": 600},
+    traffic={"timeout": 10000},
     workers=1,
     resources={
-        "gpu": 0.33,
+        "gpu": 1,
         "gpu_type": "nvidia-l4",
     },
 )
@@ -66,10 +66,10 @@ class SDXLTurbo:
 
 @bentoml.service(
     traffic={
-        "timeout": 300,
+        "timeout": 10000,
     },
     resources={
-        "gpu": 0.33,
+        "gpu": 1,
         "gpu_type": "nvidia-l4",
     },
 )
@@ -109,10 +109,9 @@ class VLLM:
 
 @bentoml.service(
     resources={
-        "gpu": 0.33,
-        "memory": "8Gi",
+        "gpu": 1,
     },
-    traffic={"timeout": 300},
+    traffic={"timeout": 10000},
 )
 
 class XTTS:
@@ -146,7 +145,7 @@ class XTTS:
 
 
 @bentoml.service(
-    traffic={"timeout": 600},
+    traffic={"timeout": 10000},
     workers=1,
     resources={"cpu": "1"}
 )

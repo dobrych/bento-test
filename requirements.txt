@@ -4,8 +4,8 @@ diffusers==0.25.1
 pillow==10.2.0
 torch==2.1.2
 transformers==4.36.2
-triton==2.1.0; sys_platform == "linux"
+triton==2.2.0; sys_platform == "linux"
 xformers==0.0.23.post1
-#vllm==0.3.0
+vllm==0.3.0
 TTS==0.22.0
 python-ffmpeg
